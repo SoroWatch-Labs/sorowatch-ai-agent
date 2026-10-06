@@ -86,11 +86,44 @@ def compute_volume_anomaly_score(operations: list[dict]) -> int:
     return min(30, int(((ratio - 1) / 19) * 30))
 
 
-def compute_risk_score(operations: list[dict]) -> int:
-    """Combine the three heuristics into a single 0-100 score."""
+def compute_account_age_score(
+    operations: list[dict], now: datetime | None = None
+) -> int:
+    """
+    Scores 0-20 based on how new the account looks. Brand-new accounts are
+    a common trait of throwaway addresses used for fraud, so a very recent
+    first operation scores higher than an established account.
+
+    The age is measured from the oldest operation we were given, so for
+    accounts with more history than the fetch limit this can understate
+    the real age. That errs on the side of a slightly higher score, never
+    a lower one. No operations at all scores 0 ("no history" is handled
+    by the other heuristics and by the caller).
+    """
+    times = [t for t in (_parse_time(op) for op in operations) if t]
+    if not times:
+        return 0
+
+    now = now or datetime.now(timezone.utc)
+    age_days = (now - min(times)).total_seconds() / 86400
+    if age_days < 0:
+        # Timestamps in the future are unreliable; don't penalise them.
+        return 0
+    if age_days < 1:
+        return 20
+    if age_days < 7:
+        return 10
+    if age_days < 30:
+        return 5
+    return 0
+
+
+def compute_risk_score(operations: list[dict], now: datetime | None = None) -> int:
+    """Combine all heuristics into a single 0-100 score (clamped)."""
     score = (
         compute_tx_velocity_score(operations)
         + compute_counterparty_diversity_score(operations)
         + compute_volume_anomaly_score(operations)
+        + compute_account_age_score(operations, now=now)
     )
     return max(0, min(100, score))
