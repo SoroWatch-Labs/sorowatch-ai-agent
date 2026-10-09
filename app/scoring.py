@@ -4,6 +4,7 @@ directly unit-testable without needing a live Horizon connection.
 """
 from collections import Counter
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 
 
 def _parse_time(op: dict) -> datetime | None:
@@ -118,6 +119,44 @@ def compute_account_age_score(
     return 0
 
 
+ROUND_AMOUNT_UNIT = Decimal(100)
+ROUND_AMOUNT_MIN_PAYMENTS = 3
+
+
+def compute_round_amount_score(operations: list[dict]) -> int:
+    """
+    Scores 0-10 based on how many payments are suspiciously round (a
+    multiple of 100, at least 100). Structured or scripted transfers often
+    use round figures, while organic payments rarely do.
+
+    Needs at least ROUND_AMOUNT_MIN_PAYMENTS valid amounts, otherwise 0.
+    Up to half of the payments being round scores 0 (that can happen by
+    chance); the score then rises linearly to 10 when every payment is round.
+    """
+    amounts = []
+    for op in operations:
+        raw = op.get("amount")
+        if raw is None:
+            continue
+        try:
+            value = Decimal(str(raw))
+        except InvalidOperation:
+            continue
+        if value.is_finite() and value > 0:
+            amounts.append(value)
+
+    if len(amounts) < ROUND_AMOUNT_MIN_PAYMENTS:
+        return 0
+
+    round_count = sum(
+        1 for a in amounts if a >= ROUND_AMOUNT_UNIT and a % ROUND_AMOUNT_UNIT == 0
+    )
+    share = round_count / len(amounts)
+    if share <= 0.5:
+        return 0
+    return min(10, int((share - 0.5) / 0.5 * 10))
+
+
 def compute_risk_score(operations: list[dict], now: datetime | None = None) -> int:
     """Combine all heuristics into a single 0-100 score (clamped)."""
     score = (
@@ -125,5 +164,6 @@ def compute_risk_score(operations: list[dict], now: datetime | None = None) -> i
         + compute_counterparty_diversity_score(operations)
         + compute_volume_anomaly_score(operations)
         + compute_account_age_score(operations, now=now)
+        + compute_round_amount_score(operations)
     )
     return max(0, min(100, score))

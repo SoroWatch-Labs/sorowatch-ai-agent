@@ -1,4 +1,5 @@
 from app.scoring import (
+    compute_round_amount_score,
     compute_tx_velocity_score,
     compute_counterparty_diversity_score,
     compute_volume_anomaly_score,
@@ -136,3 +137,75 @@ def test_risk_score_includes_account_age_and_stays_capped():
         ops, now=datetime(2030, 1, 1, tzinfo=timezone.utc))
     assert with_age - without_age == 20
     assert 0 <= with_age <= 100
+
+
+def _amounts(*values):
+    return [{"amount": v} for v in values]
+
+
+def test_round_amount_zero_when_no_payments():
+    assert compute_round_amount_score([]) == 0
+
+
+def test_round_amount_zero_with_too_few_payments():
+    assert compute_round_amount_score(_amounts("500", "1000")) == 0
+
+
+def test_round_amount_zero_for_organic_amounts():
+    assert compute_round_amount_score(
+        _amounts("12.34", "87.5", "431.21", "9.99")) == 0
+
+
+def test_round_amount_full_score_when_every_payment_is_round():
+    assert compute_round_amount_score(
+        _amounts("100", "500", "1000", "2500")) == 10
+
+
+def test_round_amount_scales_between_half_and_all():
+    # 3 of 4 round -> share 0.75 -> halfway between 0 and 10.
+    assert compute_round_amount_score(
+        _amounts("100", "200", "300", "12.5")) == 5
+
+
+def test_round_amount_half_round_scores_zero():
+    assert compute_round_amount_score(
+        _amounts("100", "200", "12.5", "7.3")) == 0
+
+
+def test_round_amount_ignores_small_round_numbers():
+    # 10 and 50 are round-looking but below the 100 threshold.
+    assert compute_round_amount_score(_amounts("10", "50", "20", "30")) == 0
+
+
+def test_round_amount_handles_stellar_seven_decimal_format():
+    assert compute_round_amount_score(
+        _amounts("500.0000000", "1000.0000000", "100.0000000")) == 10
+
+
+def test_round_amount_skips_missing_invalid_and_non_positive():
+    ops = [
+        {"amount": "100"}, {"amount": "200"}, {"amount": "300"},
+        {"other": "x"}, {"amount": "abc"}, {"amount": "-500"},
+        {"amount": "0"}, {"amount": "NaN"},
+    ]
+    assert compute_round_amount_score(ops) == 10
+
+
+def test_risk_score_includes_round_amounts():
+    # Old account, spread out in time, different counterparties: the only
+    # difference between the two lists is whether the amounts are round.
+    def ops(amount):
+        return [
+            {"created_at": f"2026-05-0{day}T00:00:00Z", "to": f"G{day}",
+             "amount": amount}
+            for day in (1, 2, 3, 4)
+        ]
+
+    assert (compute_risk_score(ops("500"), now=NOW)
+            - compute_risk_score(ops("12.5"), now=NOW)) == 10
+
+
+def test_risk_score_stays_capped_at_100_with_round_amounts():
+    ops = [{"created_at": "2026-06-01T11:00:00Z", "to": "GX", "amount": "500"}
+           for _ in range(10)]
+    assert compute_risk_score(ops, now=NOW) == 100
