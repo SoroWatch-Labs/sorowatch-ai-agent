@@ -35,5 +35,6 @@ async def score_address(req: ScoreRequest):
         "address": result["address"],
         "score": result["score"],
         "flagged": result["flagged"],
+        "breakdown": result["breakdown"],
         "operations_considered": len(result["operations"]),
     }
