@@ -1,4 +1,6 @@
 from app.scoring import (
+    combine_breakdown,
+    compute_score_breakdown,
     compute_round_amount_score,
     compute_tx_velocity_score,
     compute_counterparty_diversity_score,
@@ -209,3 +211,47 @@ def test_risk_score_stays_capped_at_100_with_round_amounts():
     ops = [{"created_at": "2026-06-01T11:00:00Z", "to": "GX", "amount": "500"}
            for _ in range(10)]
     assert compute_risk_score(ops, now=NOW) == 100
+
+
+BREAKDOWN_KEYS = {
+    "tx_velocity",
+    "counterparty_diversity",
+    "volume_anomaly",
+    "account_age",
+    "round_amounts",
+}
+
+
+def test_breakdown_has_one_entry_per_heuristic():
+    assert set(compute_score_breakdown([], now=NOW)) == BREAKDOWN_KEYS
+
+
+def test_breakdown_is_all_zero_for_no_operations():
+    assert set(compute_score_breakdown([], now=NOW).values()) == {0}
+
+
+def test_breakdown_matches_the_individual_heuristics():
+    ops = [
+        {"created_at": "2026-06-01T11:00:00Z", "to": "GX", "amount": "100"},
+        {"created_at": "2026-06-01T11:05:00Z", "to": "GX", "amount": "200"},
+        {"created_at": "2026-06-01T11:10:00Z", "to": "GX", "amount": "9999"},
+    ]
+    breakdown = compute_score_breakdown(ops, now=NOW)
+    assert breakdown["tx_velocity"] == compute_tx_velocity_score(ops)
+    assert breakdown["counterparty_diversity"] == compute_counterparty_diversity_score(ops)
+    assert breakdown["volume_anomaly"] == compute_volume_anomaly_score(ops)
+    assert breakdown["account_age"] == compute_account_age_score(ops, now=NOW)
+    assert breakdown["round_amounts"] == compute_round_amount_score(ops)
+
+
+def test_risk_score_equals_combined_breakdown():
+    ops = [{"created_at": "2026-05-0%dT00:00:00Z" % d, "to": f"G{d}", "amount": "12.5"}
+           for d in (1, 2, 3)]
+    assert compute_risk_score(ops, now=NOW) == combine_breakdown(
+        compute_score_breakdown(ops, now=NOW))
+
+
+def test_combine_breakdown_clamps_to_0_100():
+    assert combine_breakdown({"a": 70, "b": 70}) == 100
+    assert combine_breakdown({"a": -5, "b": 0}) == 0
+    assert combine_breakdown({}) == 0

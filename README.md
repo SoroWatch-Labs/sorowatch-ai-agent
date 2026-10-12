@@ -69,9 +69,13 @@ Request:
 
 Response (the example above):
 ```json
-{"address": "G...", "score": 93, "flagged": true, "operations_considered": 10}
+{"address": "G...", "score": 93, "flagged": true, "operations_considered": 10,
+ "breakdown": {"tx_velocity": 13, "counterparty_diversity": 30, "volume_anomaly": 30,
+               "account_age": 20, "round_amounts": 0}}
 ```
 
+`breakdown` shows how many points each heuristic added, so you can see why
+an account scored high. The values add up to `score` (capped at 100).
 `flagged` is `true` when `score >= threshold`. If Horizon keeps returning
 429 after the retries, the service answers `503` with a `Retry-After: 30`
 header.

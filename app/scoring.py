@@ -157,13 +157,24 @@ def compute_round_amount_score(operations: list[dict]) -> int:
     return min(10, int((share - 0.5) / 0.5 * 10))
 
 
+def compute_score_breakdown(
+    operations: list[dict], now: datetime | None = None
+) -> dict[str, int]:
+    """Each heuristic's own score, before they are combined."""
+    return {
+        "tx_velocity": compute_tx_velocity_score(operations),
+        "counterparty_diversity": compute_counterparty_diversity_score(operations),
+        "volume_anomaly": compute_volume_anomaly_score(operations),
+        "account_age": compute_account_age_score(operations, now=now),
+        "round_amounts": compute_round_amount_score(operations),
+    }
+
+
+def combine_breakdown(breakdown: dict[str, int]) -> int:
+    """Add the heuristic scores together and clamp the total to 0-100."""
+    return max(0, min(100, sum(breakdown.values())))
+
+
 def compute_risk_score(operations: list[dict], now: datetime | None = None) -> int:
     """Combine all heuristics into a single 0-100 score (clamped)."""
-    score = (
-        compute_tx_velocity_score(operations)
-        + compute_counterparty_diversity_score(operations)
-        + compute_volume_anomaly_score(operations)
-        + compute_account_age_score(operations, now=now)
-        + compute_round_amount_score(operations)
-    )
-    return max(0, min(100, score))
+    return combine_breakdown(compute_score_breakdown(operations, now=now))

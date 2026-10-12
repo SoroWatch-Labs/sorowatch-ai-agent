@@ -11,7 +11,7 @@ from typing import TypedDict
 from langgraph.graph import StateGraph, END
 
 from app.horizon_client import HorizonClient
-from app.scoring import compute_risk_score
+from app.scoring import combine_breakdown, compute_score_breakdown
 
 
 class PipelineState(TypedDict):
@@ -19,6 +19,7 @@ class PipelineState(TypedDict):
     threshold: int
     operations: list[dict]
     score: int
+    breakdown: dict[str, int]
     flagged: bool
 
 
@@ -29,8 +30,9 @@ async def gather_data(state: PipelineState) -> PipelineState:
 
 
 async def score_risk(state: PipelineState) -> PipelineState:
-    score = compute_risk_score(state["operations"])
-    return {**state, "score": score}
+    breakdown = compute_score_breakdown(state["operations"])
+    score = combine_breakdown(breakdown)
+    return {**state, "score": score, "breakdown": breakdown}
 
 
 async def decide_action(state: PipelineState) -> PipelineState:
@@ -59,6 +61,7 @@ async def run_pipeline(address: str, threshold: int = 50) -> PipelineState:
         "threshold": threshold,
         "operations": [],
         "score": 0,
+        "breakdown": {},
         "flagged": False,
     }
     result = await graph.ainvoke(initial_state)
